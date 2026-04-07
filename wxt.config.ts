@@ -1,7 +1,6 @@
 import { defineConfig } from 'wxt';
 
 export default defineConfig({
-  srcDir: '.',
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: '面试鸭 Anki 助手',

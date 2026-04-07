@@ -9,6 +9,7 @@ import type {
   QuestionData,
   AnkiCard,
   SaveToAnkiRequest,
+  TestAIConnectionRequest,
   AnkiConnectResponse,
   MessageResponse,
   Message
@@ -25,14 +26,13 @@ const AI_REFINE_PROMPT = `你是一位专业的 Java 面试八股文 Anki 卡片
 {
   "front": "...",
   "back": "...",
-  "tags": ["Java", "JVM", "高频"]   // 根据内容自动生成 2-4 个标签
-}`;
+  "tags": ["Java", "JVM", "高频"]
+}
+
+根据内容自动生成 2-4 个标签。`;
 
 // 从 chrome.storage.local 获取配置
 async function getConfig(): Promise<AppConfig> {
-  const result = await chrome.storage.local.get('mianshiya-anki-config');
-  const stored = result['mianshiya-anki-config'];
-
   const defaultConfig: AppConfig = {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
@@ -43,19 +43,34 @@ async function getConfig(): Promise<AppConfig> {
     backField: 'Back'
   };
 
-  if (stored?.state) {
-    return {
-      baseUrl: stored.state.baseUrl ?? defaultConfig.baseUrl,
-      apiKey: stored.state.apiKey ?? defaultConfig.apiKey,
-      model: stored.state.model ?? defaultConfig.model,
-      deckName: stored.state.deckName ?? defaultConfig.deckName,
-      noteType: stored.state.noteType ?? defaultConfig.noteType,
-      frontField: stored.state.frontField ?? defaultConfig.frontField,
-      backField: stored.state.backField ?? defaultConfig.backField
-    };
-  }
+  try {
+    const result = await chrome.storage.local.get('mianshiya-anki-config');
+    const rawValue = result['mianshiya-anki-config'];
 
-  return defaultConfig;
+    if (!rawValue) {
+      return defaultConfig;
+    }
+
+    // Zustand persist 存储的是 JSON 字符串，需要解析
+    const stored = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
+
+    if (stored?.state) {
+      return {
+        baseUrl: stored.state.baseUrl ?? defaultConfig.baseUrl,
+        apiKey: stored.state.apiKey ?? defaultConfig.apiKey,
+        model: stored.state.model ?? defaultConfig.model,
+        deckName: stored.state.deckName ?? defaultConfig.deckName,
+        noteType: stored.state.noteType ?? defaultConfig.noteType,
+        frontField: stored.state.frontField ?? defaultConfig.frontField,
+        backField: stored.state.backField ?? defaultConfig.backField
+      };
+    }
+
+    return defaultConfig;
+  } catch (error) {
+    console.error('[Background] 读取配置失败:', error);
+    return defaultConfig;
+  }
 }
 
 // 调用 AI 接口进行精炼
@@ -72,7 +87,8 @@ async function callAI(config: AppConfig, content: string): Promise<AnkiCard> {
         { role: 'system', content: AI_REFINE_PROMPT },
         { role: 'user', content }
       ],
-      temperature: 0.3
+      temperature: 0.3,
+      response_format: { type: 'json_object' }
     })
   });
 
@@ -88,14 +104,22 @@ async function callAI(config: AppConfig, content: string): Promise<AnkiCard> {
     throw new Error('AI 返回内容为空');
   }
 
+  console.log('[Background] AI 原始响应:', messageContent);
+
   // 解析 JSON 响应
   try {
-    // 尝试提取 JSON（可能被 markdown 代码块包裹）
-    let jsonStr = messageContent;
-    const jsonMatch = messageContent.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1].trim();
+    // 尝试提取 JSON - 找到第一个 { 和最后一个 }
+    const firstBrace = messageContent.indexOf('{');
+    const lastBrace = messageContent.lastIndexOf('}');
+
+    let jsonStr: string;
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      jsonStr = messageContent.slice(firstBrace, lastBrace + 1);
+    } else {
+      jsonStr = messageContent;
     }
+
+    console.log('[Background] 待解析 JSON:', jsonStr);
 
     const card: AnkiCard = JSON.parse(jsonStr);
 
@@ -105,6 +129,7 @@ async function callAI(config: AppConfig, content: string): Promise<AnkiCard> {
 
     return card;
   } catch (parseError) {
+    console.error('[Background] JSON 解析失败，原始响应:', messageContent);
     throw new Error(`解析 AI 响应失败: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
   }
 }
@@ -190,6 +215,7 @@ async function testAnkiConnection(): Promise<boolean> {
 async function saveToAnki(question: QuestionData): Promise<MessageResponse> {
   try {
     const config = await getConfig();
+    console.log('[Background] 当前配置:', config);
 
     // 验证配置
     if (!config.apiKey) {
@@ -197,6 +223,9 @@ async function saveToAnki(question: QuestionData): Promise<MessageResponse> {
     }
 
     // 构建要发送给 AI 的内容
+    console.log('[Background] 爬取到的题目:', question.title);
+    console.log('[Background] 爬取到的答案:', question.answer);
+
     const contentToRefine = `题目：${question.title}\n\n答案：${question.answer}`;
 
     // 调用 AI 精炼
@@ -239,8 +268,9 @@ export default defineBackground(() => {
           return { success: true, data: config };
         }
         case 'TEST_AI_CONNECTION': {
-          const config = await getConfig();
-          const connected = await testAIConnection(config);
+          const payload = message.payload as TestAIConnectionRequest | undefined;
+          const config = payload ? { baseUrl: payload.baseUrl, apiKey: payload.apiKey } : await getConfig();
+          const connected = await testAIConnection(config as AppConfig);
           return { success: connected, error: connected ? undefined : 'AI 连接失败，请检查配置' };
         }
         case 'TEST_ANKI_CONNECTION': {

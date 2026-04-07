@@ -4,8 +4,8 @@
   "description": "面试鸭题目一键保存到 Anki 的浏览器扩展",
   "type": "module",
   "scripts": {
-    "dev": "wxt dev",
-    "dev:firefox": "wxt dev -b firefox",
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",

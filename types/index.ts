@@ -72,6 +72,11 @@ export type MessageType =
   | 'GET_CONFIG'
   | 'SAVE_CONFIG';
 
+export interface TestAIConnectionRequest {
+  baseUrl: string;
+  apiKey: string;
+}
+
 export interface Message<T = unknown> {
   type: MessageType;
   payload?: T;

@@ -88,7 +88,11 @@ export default function App() {
     // 先保存配置
     saveAIConfig();
 
-    const response = await sendToBackground('TEST_AI_CONNECTION');
+    // 将当前表单数据传递给 background 进行测试
+    const response = await sendToBackground('TEST_AI_CONNECTION', {
+      baseUrl: formData.baseUrl,
+      apiKey: formData.apiKey
+    });
 
     setTestStatus(prev => ({
       ...prev,
