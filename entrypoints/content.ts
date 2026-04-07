@@ -3,7 +3,7 @@
  */
 
 import { defineContentScript } from 'wxt/utils/define-content-script';
-import type { QuestionData, ToastMessage, Message, MessageResponse, SaveToAnkiRequest } from '@/types';
+import type { QuestionData, ToastMessage, Message, MessageResponse, SaveToAnkiRequest, CheckDuplicateRequest, CheckDuplicateResponse, DeleteNotesRequest, AppConfig } from '@/types';
 
 export default defineContentScript({
   matches: ['https://mianshiya.com/*', 'https://www.mianshiya.com/*'],
@@ -112,37 +112,73 @@ export default defineContentScript({
         position: fixed;
         right: 24px;
         bottom: 24px;
-        width: 56px;
-        height: 56px;
+        width: 60px;
+        height: 60px;
         border-radius: 50%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border: none;
+        background: linear-gradient(135deg, #14B8A6 0%, #0D9488 100%);
+        border: 3px solid rgba(255, 255, 255, 0.3);
         cursor: pointer;
         z-index: 999999;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        box-shadow: 
+          0 8px 24px rgba(13, 148, 136, 0.4),
+          0 4px 12px rgba(13, 148, 136, 0.3),
+          inset 0 2px 4px rgba(255, 255, 255, 0.3);
         color: white;
-        font-size: 24px;
+        font-size: 26px;
+        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
       }
-      .mianshiya-float-btn:hover { transform: scale(1.1); }
-      .mianshiya-float-btn.loading { pointer-events: none; opacity: 0.7; }
-      .mianshiya-float-btn.loading .mianshiya-spinner { animation: spin 1s linear infinite; }
-      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      .mianshiya-float-btn:hover {
+        transform: scale(1.1) translateY(-2px);
+        box-shadow: 
+          0 12px 32px rgba(13, 148, 136, 0.5),
+          0 6px 16px rgba(13, 148, 136, 0.4);
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+      .mianshiya-float-btn:active {
+        transform: scale(1.05);
+        box-shadow: 
+          0 6px 16px rgba(13, 148, 136, 0.3),
+          inset 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
+      .mianshiya-float-btn.loading { 
+        pointer-events: none; 
+        opacity: 0.8;
+        animation: btn-pulse 1.5s ease-in-out infinite;
+      }
+      .mianshiya-float-btn.loading .mianshiya-spinner { 
+        animation: spin 1s linear infinite; 
+      }
+      @keyframes spin { 
+        from { transform: rotate(0deg); } 
+        to { transform: rotate(360deg); } 
+      }
+      @keyframes btn-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
       .mianshiya-btn-tooltip {
         position: absolute;
-        right: 70px;
-        background: rgba(0, 0, 0, 0.8);
+        right: 72px;
+        background: linear-gradient(135deg, #0F766E 0%, #134E4A 100%);
         color: white;
-        padding: 8px 12px;
-        border-radius: 6px;
+        padding: 10px 16px;
+        border-radius: 10px;
         font-size: 13px;
+        font-weight: 600;
         white-space: nowrap;
         opacity: 0;
         pointer-events: none;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        border: 2px solid rgba(255, 255, 255, 0.1);
       }
-      .mianshiya-float-btn:hover .mianshiya-btn-tooltip { opacity: 1; }
+      .mianshiya-float-btn:hover .mianshiya-btn-tooltip { 
+        opacity: 1;
+        transform: translateX(-4px);
+      }
     `;
 
     function injectStyles(): void {
@@ -387,16 +423,48 @@ export default defineContentScript({
       try {
         const question = await extractQuestion();
         if (!question) {
-          btn.classList.remove('loading');
-          btn.innerHTML = `
-            <span class="mianshiya-btn-tooltip">保存到 Anki</span>
-            <svg class="mianshiya-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-              <polyline points="17 21 17 13 7 13 7 21"></polyline>
-              <polyline points="7 3 7 8 15 8"></polyline>
-            </svg>
-          `;
+          resetButton(btn);
           return;
+        }
+
+        // 检查是否有重复
+        const configResponse = await sendToBackground('GET_CONFIG');
+        if (!configResponse.success) {
+          showToast({ type: 'error', message: '获取配置失败' });
+          resetButton(btn);
+          return;
+        }
+        
+        const config = configResponse.data as AppConfig;
+        const checkResponse = await sendToBackground<CheckDuplicateRequest, CheckDuplicateResponse>('CHECK_DUPLICATE', {
+          title: question.title,
+          deckName: config.deckName,
+          frontField: config.frontField
+        });
+
+        if (checkResponse.success && checkResponse.data?.hasDuplicate) {
+          // 有重复，让用户选择
+          const shouldReplace = await showConfirmDialog(
+            '检测到重复卡片',
+            `题目 "${question.title}" 已存在于卡组中。是否删除旧卡片并重新添加？`
+          );
+          
+          if (!shouldReplace) {
+            showToast({ type: 'info', message: '已取消保存' });
+            resetButton(btn);
+            return;
+          }
+
+          // 删除旧卡片
+          const deleteResponse = await sendToBackground<DeleteNotesRequest>('DELETE_NOTES', {
+            noteIds: checkResponse.data?.noteIds || []
+          });
+          
+          if (!deleteResponse.success) {
+            showToast({ type: 'error', message: '删除旧卡片失败' });
+            resetButton(btn);
+            return;
+          }
         }
 
         const response = await sendToBackground<SaveToAnkiRequest>('SAVE_TO_ANKI', { question });
@@ -409,16 +477,20 @@ export default defineContentScript({
       } catch (error) {
         showToast({ type: 'error', message: error instanceof Error ? error.message : '未知错误' });
       } finally {
-        btn.classList.remove('loading');
-        btn.innerHTML = `
-          <span class="mianshiya-btn-tooltip">保存到 Anki</span>
-          <svg class="mianshiya-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-            <polyline points="17 21 17 13 7 13 7 21"></polyline>
-            <polyline points="7 3 7 8 15 8"></polyline>
-          </svg>
-        `;
+        resetButton(btn);
       }
+    }
+
+    function resetButton(btn: HTMLButtonElement): void {
+      btn.classList.remove('loading');
+      btn.innerHTML = `
+        <span class="mianshiya-btn-tooltip">保存到 Anki</span>
+        <svg class="mianshiya-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+          <polyline points="17 21 17 13 7 13 7 21"></polyline>
+          <polyline points="7 3 7 8 15 8"></polyline>
+        </svg>
+      `;
     }
 
     function isQuestionPage(): boolean {

@@ -70,12 +70,29 @@ export interface QuestionData {
 
 export type MessageType =
   | 'SAVE_TO_ANKI'
+  | 'CHECK_DUPLICATE'
+  | 'DELETE_NOTES'
   | 'AI_REFINE'
   | 'ANKI_ADD_NOTE'
   | 'TEST_AI_CONNECTION'
   | 'TEST_ANKI_CONNECTION'
   | 'GET_CONFIG'
   | 'SAVE_CONFIG';
+
+export interface CheckDuplicateRequest {
+  title: string;
+  deckName: string;
+  frontField: string;
+}
+
+export interface CheckDuplicateResponse {
+  hasDuplicate: boolean;
+  noteIds?: number[];
+}
+
+export interface DeleteNotesRequest {
+  noteIds: number[];
+}
 
 export interface TestAIConnectionRequest {
   baseUrl: string;

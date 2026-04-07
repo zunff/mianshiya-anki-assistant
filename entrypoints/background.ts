@@ -10,6 +10,8 @@ import type {
   AnkiCard,
   AIRefineResult,
   SaveToAnkiRequest,
+  CheckDuplicateRequest,
+  DeleteNotesRequest,
   TestAIConnectionRequest,
   AnkiConnectResponse,
   MessageResponse,
@@ -183,6 +185,68 @@ async function addToAnki(config: AppConfig, card: AnkiCard): Promise<number> {
   return result.result as number;
 }
 
+// 查找重复卡片
+async function findDuplicateNotes(
+  deckName: string,
+  frontField: string,
+  title: string
+): Promise<number[]> {
+  const query = `"deck:${deckName}" "${frontField}:${title}"`;
+  
+  const response = await fetch('http://localhost:8765', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      action: 'findNotes',
+      version: 6,
+      params: {
+        query
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`AnkiConnect 请求失败: ${response.status}`);
+  }
+
+  const result: AnkiConnectResponse<number[]> = await response.json();
+
+  if (result.error) {
+    throw new Error(`AnkiConnect 错误: ${result.error}`);
+  }
+
+  return result.result || [];
+}
+
+// 删除卡片
+async function deleteNotes(noteIds: number[]): Promise<void> {
+  const response = await fetch('http://localhost:8765', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      action: 'deleteNotes',
+      version: 6,
+      params: {
+        notes: noteIds
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`AnkiConnect 请求失败: ${response.status}`);
+  }
+
+  const result: AnkiConnectResponse<null> = await response.json();
+
+  if (result.error) {
+    throw new Error(`AnkiConnect 错误: ${result.error}`);
+  }
+}
+
 // 测试 AI 连接
 async function testAIConnection(config: AppConfig): Promise<boolean> {
   try {
@@ -283,6 +347,40 @@ export default defineBackground(() => {
         case 'TEST_ANKI_CONNECTION': {
           const connected = await testAnkiConnection();
           return { success: connected, error: connected ? undefined : 'AnkiConnect 连接失败，请确保 Anki 已启动且 AnkiConnect 插件已安装' };
+        }
+        case 'CHECK_DUPLICATE': {
+          const payload = message.payload as CheckDuplicateRequest;
+          try {
+            const noteIds = await findDuplicateNotes(
+              payload.deckName,
+              payload.frontField,
+              payload.title
+            );
+            return { 
+              success: true, 
+              data: { 
+                hasDuplicate: noteIds.length > 0, 
+                noteIds 
+              } 
+            };
+          } catch (error) {
+            return { 
+              success: false, 
+              error: error instanceof Error ? error.message : '检查重复失败' 
+            };
+          }
+        }
+        case 'DELETE_NOTES': {
+          const payload = message.payload as DeleteNotesRequest;
+          try {
+            await deleteNotes(payload.noteIds);
+            return { success: true };
+          } catch (error) {
+            return { 
+              success: false, 
+              error: error instanceof Error ? error.message : '删除卡片失败' 
+            };
+          }
         }
         default:
           return { success: false, error: `Unknown message type: ${message.type}` };

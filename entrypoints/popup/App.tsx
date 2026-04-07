@@ -123,30 +123,30 @@ export default function App() {
   };
 
   return (
-    <div className="w-[360px] min-h-[400px] bg-white dark:bg-gray-900 text-gray-900 dark:text-white animate-fadeIn">
+    <div className="w-[360px] min-h-[400px] bg-gradient-to-br from-[#F0FDFA] to-[#CCFBF1] animate-fadeIn">
       {/* Header */}
-      <header className="bg-gradient-to-r from-primary-600 to-purple-600 px-4 py-3">
+      <header className="bg-gradient-to-r from-[#0D9488] to-[#14B8A6] px-4 py-4 shadow-lg">
         <h1 className="text-lg font-bold text-white">面试鸭 Anki 助手</h1>
-        <p className="text-xs text-white/80 mt-0.5">配置 AI 和 AnkiConnect</p>
+        <p className="text-xs text-white/90 mt-1">配置 AI 和 AnkiConnect</p>
       </header>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700">
+      <div className="flex gap-2 p-4 pb-0">
         <button
-          className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+          className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-all ${
             activeTab === 'ai'
-              ? 'text-primary-600 border-b-2 border-primary-600 dark:text-primary-400 dark:border-primary-400'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              ? 'tab-active'
+              : 'bg-white/60 text-[#0F766E] hover:bg-white/80'
           }`}
           onClick={() => setActiveTab('ai')}
         >
           AI 配置
         </button>
         <button
-          className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+          className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-all ${
             activeTab === 'anki'
-              ? 'text-primary-600 border-b-2 border-primary-600 dark:text-primary-400 dark:border-primary-400'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              ? 'tab-active'
+              : 'bg-white/60 text-[#0F766E] hover:bg-white/80'
           }`}
           onClick={() => setActiveTab('anki')}
         >
@@ -157,7 +157,7 @@ export default function App() {
       {/* Content */}
       <div className="p-4">
         {activeTab === 'ai' && (
-          <div className="space-y-4">
+          <div className="space-y-4 bg-white rounded-xl p-4 shadow-sm border-2 border-[#99F6E4]/30">
             {/* Base URL */}
             <div className="form-group">
               <label className="form-label">API Base URL</label>
@@ -204,7 +204,10 @@ export default function App() {
                 保存配置
               </button>
               <button
-                className="btn-secondary"
+                className={`btn-secondary ${
+                  testStatus.ai === 'success' ? 'btn-success' : 
+                  testStatus.ai === 'error' ? 'btn-error' : ''
+                }`}
                 onClick={testAIConnection}
                 disabled={testStatus.ai === 'testing'}
               >
@@ -218,7 +221,7 @@ export default function App() {
         )}
 
         {activeTab === 'anki' && (
-          <div className="space-y-4">
+          <div className="space-y-4 bg-white rounded-xl p-4 shadow-sm border-2 border-[#99F6E4]/30">
             {/* Deck Name */}
             <div className="form-group">
               <label className="form-label">牌组名称</label>
@@ -246,7 +249,7 @@ export default function App() {
             <div className="divider" />
 
             {/* Field Mapping */}
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">字段映射</p>
+            <p className="text-sm font-semibold text-[#0F766E]">字段映射</p>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="form-group">
@@ -280,7 +283,10 @@ export default function App() {
                 保存配置
               </button>
               <button
-                className="btn-secondary"
+                className={`btn-secondary ${
+                  testStatus.anki === 'success' ? 'btn-success' : 
+                  testStatus.anki === 'error' ? 'btn-error' : ''
+                }`}
                 onClick={testAnkiConnection}
                 disabled={testStatus.anki === 'testing'}
               >
@@ -292,9 +298,9 @@ export default function App() {
             </div>
 
             {/* AnkiConnect 提示 */}
-            <div className="mt-4 p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-xs text-gray-600 dark:text-gray-400">
-              <p className="font-medium mb-1">使用说明：</p>
-              <ol className="list-decimal list-inside space-y-1">
+            <div className="hint-card">
+              <p className="font-semibold text-[#0F766E] mb-2 text-sm">使用说明：</p>
+              <ol className="list-decimal list-inside space-y-1 text-xs text-[#134E4A]">
                 <li>确保 Anki 已启动</li>
                 <li>安装 AnkiConnect 插件（代码：2055492159）</li>
                 <li>AnkiConnect 默认端口：8765</li>
@@ -305,8 +311,8 @@ export default function App() {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 dark:border-gray-700 px-4 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
-        访问 mianshiya.com 题目页面即可使用
+      <footer className="px-4 py-3 text-center">
+        <p className="text-xs text-[#0F766E]/70">访问 mianshiya.com 题目页面即可使用</p>
       </footer>
     </div>
   );
