@@ -1,0 +1,85 @@
+/* Popup 自定义样式 */
+
+/* 动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* 输入框焦点样式 */
+input:focus,
+select:focus {
+  outline: none;
+  ring: 2px;
+  ring-color: theme('colors.primary.500');
+}
+
+/* 按钮悬停效果 */
+.btn-primary {
+  @apply bg-primary-600 text-white px-4 py-2 rounded-lg font-medium transition-all duration-200;
+}
+
+.btn-primary:hover {
+  @apply bg-primary-700;
+}
+
+.btn-primary:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+.btn-secondary {
+  @apply bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-lg font-medium transition-all duration-200;
+}
+
+.btn-secondary:hover {
+  @apply bg-gray-300 dark:bg-gray-600;
+}
+
+/* 表单组 */
+.form-group {
+  @apply space-y-1;
+}
+
+.form-label {
+  @apply block text-sm font-medium text-gray-700 dark:text-gray-300;
+}
+
+.form-input {
+  @apply w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+}
+
+.form-hint {
+  @apply text-xs text-gray-500 dark:text-gray-400;
+}
+
+/* 分割线 */
+.divider {
+  @apply border-t border-gray-200 dark:border-gray-700 my-4;
+}
+
+/* 状态指示器 */
+.status-dot {
+  @apply w-2 h-2 rounded-full inline-block mr-2;
+}
+
+.status-dot.success {
+  @apply bg-green-500;
+}
+
+.status-dot.error {
+  @apply bg-red-500;
+}
+
+.status-dot.pending {
+  @apply bg-yellow-500;
+}

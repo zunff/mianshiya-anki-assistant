@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+.output/
+.wxt/
+dist/
+
+# Dev artifacts
+dev/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Test
+coverage/
+
+# Misc
+*.local
+
+#cli
+.claude/

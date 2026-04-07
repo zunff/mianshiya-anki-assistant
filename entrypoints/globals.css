@@ -1,0 +1,8 @@
+/* 全局样式 - Content Script */
+
+/* 确保我们的元素不受页面样式影响 */
+.mianshiya-anki-container,
+.mianshiya-anki-container * {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
