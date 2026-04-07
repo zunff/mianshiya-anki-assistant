@@ -245,29 +245,59 @@ export default defineContentScript({
       }
     }
 
+    function cleanHtml(element: Element): string {
+      const clone = element.cloneNode(true) as Element;
+      
+      clone.querySelectorAll('img').forEach(img => img.remove());
+      
+      clone.querySelectorAll('.code-block-extension-header').forEach(header => header.remove());
+      
+      clone.querySelectorAll('[data-id]').forEach(el => el.removeAttribute('data-id'));
+      
+      clone.querySelectorAll('[style]').forEach(el => el.removeAttribute('style'));
+      
+      clone.querySelectorAll('code.hljs').forEach(code => {
+        const text = code.textContent || '';
+        code.innerHTML = text;
+        code.removeAttribute('data-highlighted');
+        code.classList.remove('hljs');
+      });
+      
+      clone.querySelectorAll('pre').forEach(pre => {
+        const code = pre.querySelector('code');
+        if (code) {
+          const lang = code.className.match(/language-(\w+)/)?.[1];
+          if (lang && !code.textContent?.includes('```')) {
+            code.textContent = '```' + lang + '\n' + code.textContent + '\n```';
+          }
+        }
+      });
+      
+      return clone.innerHTML.trim();
+    }
+
     function waitForAnswerContent(timeout = 10000): Promise<{ html: string; isPartial: boolean }> {
       return new Promise((resolve) => {
         const check = (): { html: string; isPartial: boolean } | null => {
           const markdownBodies = document.querySelectorAll('.markdown-body');
-          let bestMatchHtml = '';
+          let bestMatchEl: Element | null = null;
           let bestMatchText = '';
           
           markdownBodies.forEach((el, index) => {
             const text = el.textContent?.trim() || '';
-            const html = el.innerHTML?.trim() || '';
             
             if (text.length > 30 && text.length > bestMatchText.length) {
-              bestMatchHtml = html;
+              bestMatchEl = el;
               bestMatchText = text;
               console.log('[Content] markdown-body[' + index + '] 文本长度:', text.length);
             }
           });
           
-          if (bestMatchText) {
+          if (bestMatchEl) {
             const hasLoginButton = bestMatchText.includes('点击登录查看完整内容') || 
                                    bestMatchText.includes('登录查看完整');
             return {
-              html: bestMatchHtml,
+              html: cleanHtml(bestMatchEl),
               isPartial: hasLoginButton
             };
           }
