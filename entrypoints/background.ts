@@ -8,6 +8,7 @@ import type {
   AppConfig,
   QuestionData,
   AnkiCard,
+  AIRefineResult,
   SaveToAnkiRequest,
   TestAIConnectionRequest,
   AnkiConnectResponse,
@@ -16,20 +17,34 @@ import type {
 } from '@/types';
 
 // AI 精炼 Prompt
-const AI_REFINE_PROMPT = `你是一位专业的 Java 面试八股文 Anki 卡片制作专家。
-请把下面的面试题和解析精炼成高质量 Anki 卡片。
+const AI_REFINE_PROMPT = `你是 Anki 卡片制作专家。把面试题解析精炼成记忆卡片。
 
-正面（Front）：题目原文（保持排版）
-背面（Back）：核心知识点 + 标准答案 + 记忆要点 + 易错点（使用 Markdown，支持代码块）
-
-输出必须是严格的 JSON 格式：
+## 输出格式
+严格的 JSON，back 字段使用 HTML 格式：
 {
-  "front": "...",
   "back": "...",
-  "tags": ["Java", "JVM", "高频"]
+  "tags": ["Java", "高频"]
 }
 
-根据内容自动生成 2-4 个标签。`;
+## 内容原则
+- **极简**: 只保留关键词和核心概念，不做详细解释
+- **无代码**: 不需要代码示例
+- **抓重点**: 突出记忆线索，细节查看原文
+
+## HTML 标签规范
+- <h3> 章节标题（如"核心概念"、"三要素"）
+- <p> 段落说明
+- <ul><li> 要点列表
+- <strong> 加粗关键词
+- <code> 标注类名/方法名/关键字
+
+## 示例输出
+{
+  "back": "<h3>核心概念</h3><ul><li>序列化：对象 → 字节流（存硬盘/网络传输）</li><li>反序列化：字节流 → 对象</li></ul><h3>三要素</h3><ul><li>实现 <code>Serializable</code> 接口（标记接口）</li><li><code>transient</code> 修饰敏感字段（不参与序列化）</li><li>定义 <code>serialVersionUID</code>（版本戳，防冲突）</li></ul><h3>注意点</h3><ul><li>静态变量不参与序列化（属于类）</li><li>父类未实现 <code>Serializable</code> 则父类字段不序列化</li></ul>",
+  "tags": ["Java", "序列化", "基础"]
+}
+
+根据内容生成 2-3 个标签。`;
 
 // 从 chrome.storage.local 获取配置
 async function getConfig(): Promise<AppConfig> {
@@ -74,7 +89,7 @@ async function getConfig(): Promise<AppConfig> {
 }
 
 // 调用 AI 接口进行精炼
-async function callAI(config: AppConfig, content: string): Promise<AnkiCard> {
+async function callAI(config: AppConfig, content: string): Promise<AIRefineResult> {
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -104,11 +119,7 @@ async function callAI(config: AppConfig, content: string): Promise<AnkiCard> {
     throw new Error('AI 返回内容为空');
   }
 
-  console.log('[Background] AI 原始响应:', messageContent);
-
-  // 解析 JSON 响应
   try {
-    // 尝试提取 JSON - 找到第一个 { 和最后一个 }
     const firstBrace = messageContent.indexOf('{');
     const lastBrace = messageContent.lastIndexOf('}');
 
@@ -119,15 +130,13 @@ async function callAI(config: AppConfig, content: string): Promise<AnkiCard> {
       jsonStr = messageContent;
     }
 
-    console.log('[Background] 待解析 JSON:', jsonStr);
+    const result: AIRefineResult = JSON.parse(jsonStr);
 
-    const card: AnkiCard = JSON.parse(jsonStr);
-
-    if (!card.front || !card.back || !Array.isArray(card.tags)) {
+    if (!result.back || !Array.isArray(result.tags)) {
       throw new Error('AI 返回的卡片格式不正确');
     }
 
-    return card;
+    return result;
   } catch (parseError) {
     console.error('[Background] JSON 解析失败，原始响应:', messageContent);
     throw new Error(`解析 AI 响应失败: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
@@ -215,25 +224,23 @@ async function testAnkiConnection(): Promise<boolean> {
 async function saveToAnki(question: QuestionData): Promise<MessageResponse> {
   try {
     const config = await getConfig();
-    console.log('[Background] 当前配置:', config);
 
-    // 验证配置
     if (!config.apiKey) {
       return { success: false, error: '请先配置 AI API Key' };
     }
 
-    // 构建要发送给 AI 的内容
-    console.log('[Background] 爬取到的题目:', question.title);
-    console.log('[Background] 爬取到的答案:', question.answer);
+    const contentToRefine = `答案：${question.answer}`;
 
-    const contentToRefine = `题目：${question.title}\n\n答案：${question.answer}`;
-
-    // 调用 AI 精炼
     console.log('[Background] 正在调用 AI 精炼...');
-    const card = await callAI(config, contentToRefine);
-    console.log('[Background] AI 精炼完成:', card);
+    const refineResult = await callAI(config, contentToRefine);
+    console.log('[Background] AI 精炼完成');
 
-    // 添加到 Anki
+    const card: AnkiCard = {
+      front: question.title,
+      back: refineResult.back,
+      tags: refineResult.tags
+    };
+
     console.log('[Background] 正在添加到 Anki...');
     const noteId = await addToAnki(config, card);
     console.log('[Background] 添加成功, noteId:', noteId);

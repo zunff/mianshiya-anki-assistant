@@ -53,6 +53,11 @@ export interface AnkiCard {
   tags: string[];
 }
 
+export interface AIRefineResult {
+  back: string;
+  tags: string[];
+}
+
 // ============ 题目数据 ============
 
 export interface QuestionData {

@@ -283,13 +283,12 @@ export default defineContentScript({
           let bestMatchEl: Element | null = null;
           let bestMatchText = '';
           
-          markdownBodies.forEach((el, index) => {
+          markdownBodies.forEach((el) => {
             const text = el.textContent?.trim() || '';
             
             if (text.length > 30 && text.length > bestMatchText.length) {
               bestMatchEl = el;
               bestMatchText = text;
-              console.log('[Content] markdown-body[' + index + '] 文本长度:', text.length);
             }
           });
           
@@ -310,7 +309,6 @@ export default defineContentScript({
           return;
         }
 
-        console.log('[Content] 开始等待答案内容...');
         const observer = new MutationObserver(() => {
           const result = check();
           if (result) {
