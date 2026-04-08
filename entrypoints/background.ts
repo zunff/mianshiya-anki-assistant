@@ -10,8 +10,6 @@ import type {
   AnkiCard,
   AIRefineResult,
   SaveToAnkiRequest,
-  CheckDuplicateRequest,
-  DeleteNotesRequest,
   TestAIConnectionRequest,
   AnkiConnectResponse,
   MessageResponse,
@@ -19,34 +17,88 @@ import type {
 } from '@/types';
 
 // AI 精炼 Prompt
-const AI_REFINE_PROMPT = `你是 Anki 卡片制作专家。把面试题解析精炼成记忆卡片。
+const AI_REFINE_PROMPT = `你是“面试八股 Anki 制卡器”。目标：把【题目+解析原文】拆成“3+1”卡组，便于 30~60 秒口述与复习。
 
-## 输出格式
-严格的 JSON，back 字段使用 HTML 格式：
+## 输入
+我会给你：
+- question：面试题
+- material：原文解析/笔记（可能很长）
+
+## 输出格式（必须严格 JSON；不得输出任何多余文字）
+返回一个对象，包含 4 张卡（3+1），字段固定为 front/back/tags：
 {
-  "back": "...",
-  "tags": ["Java", "高频"]
+  "cards": [
+    { "front": "...", "back": "...", "tags": ["...", "..."] },
+    { "front": "...", "back": "...", "tags": ["...", "..."] },
+    { "front": "...", "back": "...", "tags": ["...", "..."] },
+    { "front": "...", "back": "...", "tags": ["...", "..."] }
+  ]
 }
 
-## 内容原则
-- **极简**: 只保留关键词和核心概念，不做详细解释
-- **无代码**: 不需要代码示例
-- **抓重点**: 突出记忆线索，细节查看原文
+## 3+1 卡片定义（顺序固定）
+1) 核心结论卡：1~2 句话讲清“是什么 + 核心区别/目的”
+2) 结构框架卡：用“总-分”骨架列出分类/流程/组成/对比维度（只保留框架词）
+3) 高频追问&坑卡：面试常追问点 + 易错点（用 Q→A 超短句）
+4) 口述总卡（30~60 秒）：给“口述顺序模板”，用关键词把前三张串起来（不是长文）
 
-## HTML 标签规范
-- <h3> 章节标题（如"核心概念"、"三要素"）
-- <p> 段落说明
-- <ul><li> 要点列表
-- <strong> 加粗关键词
-- <code> 标注类名/方法名/关键字
+## 内容原则（强约束）
+- 极简：只保留“可检索关键词”；每张卡 back 最多 7 条要点
+- 无代码：不输出代码块/示例代码
+- 不编造：只基于 material；不确定写“原文未提及”
+- 面试导向：优先“区分点/边界/适用场景/代价/最佳实践”
+- 术语规范：类名/关键字用 <code> 标注；重点用 <strong>
 
-## 示例输出
+## HTML 规则
+- back 字段使用 HTML，且只能使用：<h3> <p> <ul> <li> <strong> <code>
+- 禁止使用：<br>、表格、图片、Markdown
+- front 字段用纯文本（允许少量符号如“Q：”和“•”）
+
+## 小标题规范（back 必须按卡类型输出）
+- 核心结论卡：<h3>核心结论</h3>
+- 结构框架卡：<h3>结构框架</h3>
+- 追问&坑卡：<h3>高频追问&坑</h3>
+- 口述总卡：<h3>30-60秒口述</h3> + <h3>关键词</h3>
+
+## 关键要求：追问&坑卡的 front 也要列出所有 Q
+- 追问&坑卡 front：
+  - 第一行固定： "【追问&坑】{question}"
+  - 下面用项目符号列出所有问题（只写 Q，不写 A），顺序与 back 一致
+  - 每条以 "Q：" 开头
+- 追问&坑卡 back：
+  - 仍输出 Q + A（每条一行，尽量短）
+  - 最多 6 条（挑最高频；不要超过）
+
+## 标签规则
+- 每张卡 2~3 个 tags
+- 同一道题（四张卡）tags 必须一致
+- tags 从 question/material 抽取，不超过 3 个
+
+## 输出示例（仅示例；真实输出必须根据输入生成）
 {
-  "back": "<h3>核心概念</h3><ul><li>序列化：对象 → 字节流（存硬盘/网络传输）</li><li>反序列化：字节流 → 对象</li></ul><h3>三要素</h3><ul><li>实现 <code>Serializable</code> 接口（标记接口）</li><li><code>transient</code> 修饰敏感字段（不参与序列化）</li><li>定义 <code>serialVersionUID</code>（版本戳，防冲突）</li></ul><h3>注意点</h3><ul><li>静态变量不参与序列化（属于类）</li><li>父类未实现 <code>Serializable</code> 则父类字段不序列化</li></ul>",
-  "tags": ["Java", "序列化", "基础"]
-}
+  "cards": [
+    {
+      "front": "【核心结论】序列化是什么？一句话说明",
+      "back": "<h3>核心结论</h3><ul><li><strong>序列化</strong>：对象 → 字节流（存储/传输）</li><li><strong>反序列化</strong>：字节流 → 对象</li></ul>",
+      "tags": ["Java","序列化","八股"]
+    },
+    {
+      "front": "【结构框架】序列化相关要点分哪几块？",
+      "back": "<h3>结构框架</h3><ul><li>接口：<code>Serializable</code>（标记）</li><li>版本：<code>serialVersionUID</code></li><li>字段：<code>transient</code> / static</li><li>继承：父类是否可序列化</li></ul>",
+      "tags": ["Java","序列化","八股"]
+    },
+    {
+      "front": "【追问&坑】序列化面试常追问哪些点？\\n• Q：static 会序列化吗？\\n• Q：不写 <code>serialVersionUID</code> 会怎样？\\n• Q：父类未实现 <code>Serializable</code> 会怎样？",
+      "back": "<h3>高频追问&坑</h3><ul><li>Q：static 会序列化吗？A：不会（属于类）</li><li>Q：不写 <code>serialVersionUID</code>？A：版本变更易失败</li><li>Q：父类未实现接口？A：原文未提及则标注</li></ul>",
+      "tags": ["Java","序列化","八股"]
+    },
+    {
+      "front": "【口述总卡】请用 30-60 秒讲清序列化",
+      "back": "<h3>30-60秒口述</h3><ul><li>先定义：序列化/反序列化</li><li>再讲用途：存储/网络传输</li><li>再讲关键点：接口、UID、transient/static</li><li>最后给注意：版本兼容/安全风险（原文未提及则不写）</li></ul><h3>关键词</h3><ul><li><code>Serializable</code></li><li><code>serialVersionUID</code></li><li><code>transient</code></li></ul>",
+      "tags": ["Java","序列化","八股"]
+    }
+  ]
+}`;
 
-根据内容生成 2-3 个标签。`;
 
 // 从 chrome.storage.local 获取配置
 async function getConfig(): Promise<AppConfig> {
@@ -91,7 +143,9 @@ async function getConfig(): Promise<AppConfig> {
 }
 
 // 调用 AI 接口进行精炼
-async function callAI(config: AppConfig, content: string): Promise<AIRefineResult> {
+async function callAI(config: AppConfig, question: string, content: string): Promise<AIRefineResult> {
+  const userContent = `question: ${question}\n\nmaterial: ${content}`;
+
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -102,7 +156,7 @@ async function callAI(config: AppConfig, content: string): Promise<AIRefineResul
       model: config.model,
       messages: [
         { role: 'system', content: AI_REFINE_PROMPT },
-        { role: 'user', content }
+        { role: 'user', content: userContent }
       ],
       temperature: 0.3,
       response_format: { type: 'json_object' }
@@ -134,7 +188,7 @@ async function callAI(config: AppConfig, content: string): Promise<AIRefineResul
 
     const result: AIRefineResult = JSON.parse(jsonStr);
 
-    if (!result.back || !Array.isArray(result.tags)) {
+    if (!result.cards || !Array.isArray(result.cards)) {
       throw new Error('AI 返回的卡片格式不正确');
     }
 
@@ -185,68 +239,6 @@ async function addToAnki(config: AppConfig, card: AnkiCard): Promise<number> {
   return result.result as number;
 }
 
-// 查找重复卡片
-async function findDuplicateNotes(
-  deckName: string,
-  frontField: string,
-  title: string
-): Promise<number[]> {
-  const query = `"deck:${deckName}" "${frontField}:${title}"`;
-  
-  const response = await fetch('http://localhost:8765', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      action: 'findNotes',
-      version: 6,
-      params: {
-        query
-      }
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`AnkiConnect 请求失败: ${response.status}`);
-  }
-
-  const result: AnkiConnectResponse<number[]> = await response.json();
-
-  if (result.error) {
-    throw new Error(`AnkiConnect 错误: ${result.error}`);
-  }
-
-  return result.result || [];
-}
-
-// 删除卡片
-async function deleteNotes(noteIds: number[]): Promise<void> {
-  const response = await fetch('http://localhost:8765', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      action: 'deleteNotes',
-      version: 6,
-      params: {
-        notes: noteIds
-      }
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`AnkiConnect 请求失败: ${response.status}`);
-  }
-
-  const result: AnkiConnectResponse<null> = await response.json();
-
-  if (result.error) {
-    throw new Error(`AnkiConnect 错误: ${result.error}`);
-  }
-}
-
 // 测试 AI 连接
 async function testAIConnection(config: AppConfig): Promise<boolean> {
   try {
@@ -293,25 +285,22 @@ async function saveToAnki(question: QuestionData): Promise<MessageResponse> {
       return { success: false, error: '请先配置 AI API Key' };
     }
 
-    const contentToRefine = `答案：${question.answer}`;
-
     console.log('[Background] 正在调用 AI 精炼...');
-    const refineResult = await callAI(config, contentToRefine);
-    console.log('[Background] AI 精炼完成');
+    const refineResult = await callAI(config, question.title, question.answer);
+    console.log('[Background] AI 精炼完成，生成', refineResult.cards.length, '张卡片');
 
-    const card: AnkiCard = {
-      front: question.title,
-      back: refineResult.back,
-      tags: refineResult.tags
-    };
+    const noteIds: number[] = [];
+    for (const card of refineResult.cards) {
+      console.log('[Background] 正在添加卡片:', card.front.substring(0, 30) + '...');
+      const noteId = await addToAnki(config, card);
+      noteIds.push(noteId);
+    }
 
-    console.log('[Background] 正在添加到 Anki...');
-    const noteId = await addToAnki(config, card);
-    console.log('[Background] 添加成功, noteId:', noteId);
+    console.log('[Background] 添加成功, noteIds:', noteIds);
 
     return {
       success: true,
-      data: { noteId, card }
+      data: { noteIds, cards: refineResult.cards }
     };
   } catch (error) {
     console.error('[Background] 保存失败:', error);
@@ -347,40 +336,6 @@ export default defineBackground(() => {
         case 'TEST_ANKI_CONNECTION': {
           const connected = await testAnkiConnection();
           return { success: connected, error: connected ? undefined : 'AnkiConnect 连接失败，请确保 Anki 已启动且 AnkiConnect 插件已安装' };
-        }
-        case 'CHECK_DUPLICATE': {
-          const payload = message.payload as CheckDuplicateRequest;
-          try {
-            const noteIds = await findDuplicateNotes(
-              payload.deckName,
-              payload.frontField,
-              payload.title
-            );
-            return { 
-              success: true, 
-              data: { 
-                hasDuplicate: noteIds.length > 0, 
-                noteIds 
-              } 
-            };
-          } catch (error) {
-            return { 
-              success: false, 
-              error: error instanceof Error ? error.message : '检查重复失败' 
-            };
-          }
-        }
-        case 'DELETE_NOTES': {
-          const payload = message.payload as DeleteNotesRequest;
-          try {
-            await deleteNotes(payload.noteIds);
-            return { success: true };
-          } catch (error) {
-            return { 
-              success: false, 
-              error: error instanceof Error ? error.message : '删除卡片失败' 
-            };
-          }
         }
         default:
           return { success: false, error: `Unknown message type: ${message.type}` };

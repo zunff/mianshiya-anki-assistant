@@ -3,7 +3,7 @@
  */
 
 import { defineContentScript } from 'wxt/utils/define-content-script';
-import type { QuestionData, ToastMessage, Message, MessageResponse, SaveToAnkiRequest, CheckDuplicateRequest, CheckDuplicateResponse, DeleteNotesRequest, AppConfig } from '@/types';
+import type { QuestionData, ToastMessage, Message, MessageResponse, SaveToAnkiRequest } from '@/types';
 
 export default defineContentScript({
   matches: ['https://mianshiya.com/*', 'https://www.mianshiya.com/*'],
@@ -54,57 +54,6 @@ export default defineContentScript({
         cursor: pointer;
       }
       .mianshiya-toast-btn:hover { background: rgba(255, 255, 255, 0.2); }
-      .mianshiya-dialog-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 999998;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .mianshiya-dialog {
-        background: white;
-        border-radius: 12px;
-        padding: 24px;
-        max-width: 400px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-      }
-      .mianshiya-dialog h3 {
-        margin: 0 0 12px;
-        font-size: 16px;
-        color: #1f2937;
-      }
-      .mianshiya-dialog p {
-        margin: 0 0 20px;
-        font-size: 14px;
-        color: #6b7280;
-        line-height: 1.5;
-      }
-      .mianshiya-dialog-buttons {
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-      }
-      .mianshiya-dialog-btn {
-        padding: 8px 16px;
-        border-radius: 6px;
-        border: none;
-        font-size: 14px;
-        cursor: pointer;
-        font-weight: 500;
-      }
-      .mianshiya-dialog-btn-primary {
-        background: #667eea;
-        color: white;
-      }
-      .mianshiya-dialog-btn-secondary {
-        background: #e5e7eb;
-        color: #374151;
-      }
     `;
 
     const BUTTON_STYLES = `
@@ -233,38 +182,6 @@ export default defineContentScript({
       setTimeout(() => toast.remove(), message.duration ?? 5000);
     }
 
-    function showConfirmDialog(title: string, message: string): Promise<boolean> {
-      return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.className = 'mianshiya-dialog-overlay';
-        
-        const dialog = document.createElement('div');
-        dialog.className = 'mianshiya-dialog';
-        dialog.innerHTML = `
-          <h3>${title}</h3>
-          <p>${message}</p>
-          <div class="mianshiya-dialog-buttons">
-            <button class="mianshiya-dialog-btn mianshiya-dialog-btn-secondary">取消</button>
-            <button class="mianshiya-dialog-btn mianshiya-dialog-btn-primary">继续</button>
-          </div>
-        `;
-
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        const handleResolve = (value: boolean) => {
-          overlay.remove();
-          resolve(value);
-        };
-
-        dialog.querySelector('.mianshiya-dialog-btn-secondary')?.addEventListener('click', () => handleResolve(false));
-        dialog.querySelector('.mianshiya-dialog-btn-primary')?.addEventListener('click', () => handleResolve(true));
-        overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) handleResolve(false);
-        });
-      });
-    }
-
     async function sendToBackground<T = unknown, R = unknown>(
       type: string,
       payload?: T
@@ -378,15 +295,7 @@ export default defineContentScript({
       }
 
       if (isPartial) {
-        const shouldContinue = await showConfirmDialog(
-          '检测到登录限制',
-          '答案可能不完整（需要登录查看完整内容）。是否继续保存可见部分？'
-        );
-        
-        if (!shouldContinue) {
-          showToast({ type: 'info', message: '已取消保存' });
-          return null;
-        }
+        showToast({ type: 'warning', message: '检测到登录限制，答案可能不完整，将保存可见部分' });
       }
 
       return { title, answer, url: window.location.href };
@@ -427,50 +336,11 @@ export default defineContentScript({
           return;
         }
 
-        // 检查是否有重复
-        const configResponse = await sendToBackground('GET_CONFIG');
-        if (!configResponse.success) {
-          showToast({ type: 'error', message: '获取配置失败' });
-          resetButton(btn);
-          return;
-        }
-        
-        const config = configResponse.data as AppConfig;
-        const checkResponse = await sendToBackground<CheckDuplicateRequest, CheckDuplicateResponse>('CHECK_DUPLICATE', {
-          title: question.title,
-          deckName: config.deckName,
-          frontField: config.frontField
-        });
-
-        if (checkResponse.success && checkResponse.data?.hasDuplicate) {
-          // 有重复，让用户选择
-          const shouldReplace = await showConfirmDialog(
-            '检测到重复卡片',
-            `题目 "${question.title}" 已存在于卡组中。是否删除旧卡片并重新添加？`
-          );
-          
-          if (!shouldReplace) {
-            showToast({ type: 'info', message: '已取消保存' });
-            resetButton(btn);
-            return;
-          }
-
-          // 删除旧卡片
-          const deleteResponse = await sendToBackground<DeleteNotesRequest>('DELETE_NOTES', {
-            noteIds: checkResponse.data?.noteIds || []
-          });
-          
-          if (!deleteResponse.success) {
-            showToast({ type: 'error', message: '删除旧卡片失败' });
-            resetButton(btn);
-            return;
-          }
-        }
-
         const response = await sendToBackground<SaveToAnkiRequest>('SAVE_TO_ANKI', { question });
 
         if (response.success) {
-          showToast({ type: 'success', message: '已成功保存到 Anki！' });
+          const cardsCount = (response.data as { noteIds?: number[] })?.noteIds?.length || 0;
+          showToast({ type: 'success', message: `已成功保存 ${cardsCount} 张卡片到 Anki！` });
         } else {
           showToast({ type: 'error', message: response.error || '保存失败' });
         }
