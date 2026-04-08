@@ -1,10 +1,18 @@
 # Anki 卡片模板
 
 > 此文件为 Anki 卡片的样式模板，非本项目业务代码，仅作为 AI 生成卡片内容的参考。
+> 设置模板：AnkiPC端 -> 工具 -> 管理笔记模板 -> 卡片 -> 把下面的 html 和 css 复制到对应的框内
 
 ## 卡片结构
 
 ### 正面模板 (Front Template)
+```html
+<div class="card-front">
+	{{Front}}
+</div>
+```
+
+### 背面模板 (Back Template)
 ```html
 <div class="card-front">
 	{{FrontSide}}
@@ -27,10 +35,10 @@
 }
 
 /* --- 卡片正面样式 --- */
-.card-front {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+.card-front{
+  display: block;
+  white-space: pre-line;
+  word-break: break-word;
 }
 
 /* --- 卡片全局：优先适配手机 --- */
@@ -231,4 +239,5 @@ hr {
         font-size: 14px;
     }
 }
+```
 ```
