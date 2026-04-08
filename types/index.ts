@@ -13,6 +13,8 @@ export interface AIConfig {
 // ============ AnkiConnect 配置 ============
 
 export interface AnkiConfig {
+  ankiHost: string;
+  ankiPort: string;
   deckName: string;
   noteType: string;
   frontField: string;
@@ -34,6 +36,8 @@ export const DEFAULT_AI_CONFIG: AIConfig = {
 };
 
 export const DEFAULT_ANKI_CONFIG: AnkiConfig = {
+  ankiHost: 'localhost',
+  ankiPort: '8765',
   deckName: '面试鸭-八股文',
   noteType: 'Basic',
   frontField: 'Front',
@@ -69,12 +73,16 @@ export interface QuestionData {
 
 export type MessageType =
   | 'SAVE_TO_ANKI'
+  | 'START_TASK'
+  | 'CANCEL_TASK'
+  | 'GET_TASKS'
   | 'AI_REFINE'
   | 'ANKI_ADD_NOTE'
   | 'TEST_AI_CONNECTION'
   | 'TEST_ANKI_CONNECTION'
   | 'GET_CONFIG'
-  | 'SAVE_CONFIG';
+  | 'SAVE_CONFIG'
+  | 'CLEAR_COLLECTED_CACHE';
 
 export interface TestAIConnectionRequest {
   baseUrl: string;
@@ -153,3 +161,22 @@ export interface ToastMessage {
   message: string;
   duration?: number;
 }
+
+// ============ 任务状态 ============
+
+export interface Task {
+  title: string;
+  url: string;
+  status: 'processing' | 'success' | 'error';
+  progress: string;
+  cardsCount?: number;
+  error?: string;
+}
+
+// ============ 存储键名 ============
+
+export const STORAGE_KEYS = {
+  CONFIG: 'mianshiya-anki-config',
+  TASKS: 'mianshiya-anki-tasks',
+  COLLECTED: 'mianshiya-anki-collected'
+} as const;

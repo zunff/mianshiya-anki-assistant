@@ -16,7 +16,7 @@ interface AppState extends AppConfig {
 
   // Actions
   setAIConfig: (config: Partial<Pick<AppConfig, 'baseUrl' | 'apiKey' | 'model'>>) => void;
-  setAnkiConfig: (config: Partial<Pick<AppConfig, 'deckName' | 'noteType' | 'frontField' | 'backField'>>) => void;
+  setAnkiConfig: (config: Partial<Pick<AppConfig, 'ankiHost' | 'ankiPort' | 'deckName' | 'noteType' | 'frontField' | 'backField'>>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   resetConfig: () => void;
@@ -24,9 +24,11 @@ interface AppState extends AppConfig {
 
 // 默认配置
 const defaultConfig: AppConfig = {
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: 'https://api.lkeap.cloud.tencent.com/coding/v3',
   apiKey: '',
-  model: 'gpt-4o-mini',
+  model: 'glm-5',
+  ankiHost: 'localhost',
+  ankiPort: '8765',
   deckName: '面试鸭-八股文',
   noteType: 'Basic',
   frontField: 'Front',
@@ -94,6 +96,8 @@ export const useAppStore = create<AppState>()(
         baseUrl: state.baseUrl,
         apiKey: state.apiKey,
         model: state.model,
+        ankiHost: state.ankiHost,
+        ankiPort: state.ankiPort,
         deckName: state.deckName,
         noteType: state.noteType,
         frontField: state.frontField,
@@ -113,6 +117,8 @@ export const getConfig = async (): Promise<AppConfig> => {
       baseUrl: stored.state.baseUrl ?? defaultConfig.baseUrl,
       apiKey: stored.state.apiKey ?? defaultConfig.apiKey,
       model: stored.state.model ?? defaultConfig.model,
+      ankiHost: stored.state.ankiHost ?? defaultConfig.ankiHost,
+      ankiPort: stored.state.ankiPort ?? defaultConfig.ankiPort,
       deckName: stored.state.deckName ?? defaultConfig.deckName,
       noteType: stored.state.noteType ?? defaultConfig.noteType,
       frontField: stored.state.frontField ?? defaultConfig.frontField,

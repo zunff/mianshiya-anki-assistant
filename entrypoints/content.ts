@@ -3,7 +3,7 @@
  */
 
 import { defineContentScript } from 'wxt/utils/define-content-script';
-import type { QuestionData, ToastMessage, Message, MessageResponse, SaveToAnkiRequest } from '@/types';
+import type { QuestionData, ToastMessage, Message, MessageResponse } from '@/types';
 
 export default defineContentScript({
   matches: ['https://mianshiya.com/*', 'https://www.mianshiya.com/*'],
@@ -187,14 +187,26 @@ export default defineContentScript({
       payload?: T
     ): Promise<MessageResponse<R>> {
       try {
+        // 检查扩展上下文是否有效
+        if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
+          showToast({ type: 'error', message: '扩展已重新加载，请刷新页面' });
+          return { success: false, error: '扩展已重新加载，请刷新页面' };
+        }
         const message: Message<T> = { type: type as never, payload };
         const response = await chrome.runtime.sendMessage(message);
         return response as MessageResponse<R>;
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        };
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        // 检测是否是扩展上下文失效
+        if (
+          errorMsg.includes('Extension context invalidated') ||
+          errorMsg.includes('Extension context invalidated') ||
+          errorMsg.includes('sendMessage')
+        ) {
+          showToast({ type: 'error', message: '扩展已重新加载，请刷新页面' });
+          return { success: false, error: '扩展已重新加载，请刷新页面' };
+        }
+        return { success: false, error: errorMsg };
       }
     }
 
@@ -322,7 +334,7 @@ export default defineContentScript({
 
       btn.classList.add('loading');
       btn.innerHTML = `
-        <span class="mianshiya-btn-tooltip">正在处理...</span>
+        <span class="mianshiya-btn-tooltip">提交中...</span>
         <svg class="mianshiya-spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10" stroke-opacity="0.3"></circle>
           <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1"></path>
@@ -336,13 +348,18 @@ export default defineContentScript({
           return;
         }
 
-        const response = await sendToBackground<SaveToAnkiRequest>('SAVE_TO_ANKI', { question });
+        const response = await sendToBackground<{ duplicate?: boolean; started?: boolean; reason?: string }>('START_TASK', { question });
 
         if (response.success) {
-          const cardsCount = (response.data as { noteIds?: number[] })?.noteIds?.length || 0;
-          showToast({ type: 'success', message: `已成功保存 ${cardsCount} 张卡片到 Anki！` });
+          if (response.data?.duplicate) {
+            showToast({ type: 'info', message: '该题目已收集过' });
+          } else if (response.data?.started) {
+            showToast({ type: 'success', message: '任务已提交，请打开扩展查看进度' });
+          } else {
+            showToast({ type: 'info', message: response.data?.reason || '任务已存在' });
+          }
         } else {
-          showToast({ type: 'error', message: response.error || '保存失败' });
+          showToast({ type: 'error', message: response.error || '提交失败' });
         }
       } catch (error) {
         showToast({ type: 'error', message: error instanceof Error ? error.message : '未知错误' });

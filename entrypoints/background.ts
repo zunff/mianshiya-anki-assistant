@@ -1,6 +1,6 @@
 /**
  * Background Script - 后台脚本
- * 职责：消息中转、AI 调用、AnkiConnect 集成、配置管理
+ * 职责：消息中转、AI 调用、AnkiConnect 集成、配置管理、异步任务
  */
 
 import { defineBackground } from 'wxt/utils/define-background';
@@ -13,11 +13,19 @@ import type {
   TestAIConnectionRequest,
   AnkiConnectResponse,
   MessageResponse,
-  Message
+  Message,
+  Task,
+  STORAGE_KEYS
 } from '@/types';
 
+const STORAGE_KEY = {
+  CONFIG: 'mianshiya-anki-config',
+  TASKS: 'mianshiya-anki-tasks',
+  COLLECTED: 'mianshiya-anki-collected'
+} as const;
+
 // AI 精炼 Prompt
-const AI_REFINE_PROMPT = `你是“面试八股 Anki 制卡器”。目标：把【题目+解析原文】拆成“3+1”卡组，便于 30~60 秒口述与复习。
+const AI_REFINE_PROMPT = `你是"面试八股 Anki 制卡器"。目标：把【题目+解析原文】拆成"3+1"卡组，便于 30~60 秒口述与复习。
 
 ## 输入
 我会给你：
@@ -36,22 +44,22 @@ const AI_REFINE_PROMPT = `你是“面试八股 Anki 制卡器”。目标：把
 }
 
 ## 3+1 卡片定义（顺序固定）
-1) 核心结论卡：1~2 句话讲清“是什么 + 核心区别/目的”
-2) 结构框架卡：用“总-分”骨架列出分类/流程/组成/对比维度（只保留框架词）
+1) 核心结论卡：1~2 句话讲清"是什么 + 核心区别/目的"
+2) 结构框架卡：用"总-分"骨架列出分类/流程/组成/对比维度（只保留框架词）
 3) 高频追问&坑卡：面试常追问点 + 易错点（用 Q→A 超短句）
-4) 口述总卡（30~60 秒）：给“口述顺序模板”，用关键词把前三张串起来（不是长文）
+4) 口述总卡（30~60 秒）：给"口述顺序模板"，用关键词把前三张串起来（不是长文）
 
 ## 内容原则（强约束）
-- 极简：只保留“可检索关键词”；每张卡 back 最多 7 条要点
+- 极简：只保留"可检索关键词"；每张卡 back 最多 7 条要点
 - 无代码：不输出代码块/示例代码
-- 不编造：只基于 material；不确定写“原文未提及”
-- 面试导向：优先“区分点/边界/适用场景/代价/最佳实践”
+- 不编造：只基于 material；不确定写"原文未提及"
+- 面试导向：优先"区分点/边界/适用场景/代价/最佳实践"
 - 术语规范：类名/关键字用 <code> 标注；重点用 <strong>
 
 ## HTML 规则
 - back 字段使用 HTML，且只能使用：<h3> <p> <ul> <li> <strong> <code>
 - 禁止使用：<br>、表格、图片、Markdown
-- front 字段用纯文本（允许少量符号如“Q：”和“•”）
+- front 字段用纯文本（允许少量符号如"Q："和"•"）
 
 ## 小标题规范（back 必须按卡类型输出）
 - 核心结论卡：<h3>核心结论</h3>
@@ -100,12 +108,15 @@ const AI_REFINE_PROMPT = `你是“面试八股 Anki 制卡器”。目标：把
 }`;
 
 
-// 从 chrome.storage.local 获取配置
+// ============ 配置管理 ============
+
 async function getConfig(): Promise<AppConfig> {
   const defaultConfig: AppConfig = {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
     model: 'gpt-4o-mini',
+    ankiHost: 'localhost',
+    ankiPort: '8765',
     deckName: '面试鸭-八股文',
     noteType: 'Basic',
     frontField: 'Front',
@@ -113,14 +124,13 @@ async function getConfig(): Promise<AppConfig> {
   };
 
   try {
-    const result = await chrome.storage.local.get('mianshiya-anki-config');
-    const rawValue = result['mianshiya-anki-config'];
+    const result = await chrome.storage.local.get(STORAGE_KEY.CONFIG);
+    const rawValue = result[STORAGE_KEY.CONFIG];
 
     if (!rawValue) {
       return defaultConfig;
     }
 
-    // Zustand persist 存储的是 JSON 字符串，需要解析
     const stored = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
 
     if (stored?.state) {
@@ -128,6 +138,8 @@ async function getConfig(): Promise<AppConfig> {
         baseUrl: stored.state.baseUrl ?? defaultConfig.baseUrl,
         apiKey: stored.state.apiKey ?? defaultConfig.apiKey,
         model: stored.state.model ?? defaultConfig.model,
+        ankiHost: stored.state.ankiHost ?? defaultConfig.ankiHost,
+        ankiPort: stored.state.ankiPort ?? defaultConfig.ankiPort,
         deckName: stored.state.deckName ?? defaultConfig.deckName,
         noteType: stored.state.noteType ?? defaultConfig.noteType,
         frontField: stored.state.frontField ?? defaultConfig.frontField,
@@ -142,8 +154,103 @@ async function getConfig(): Promise<AppConfig> {
   }
 }
 
-// 调用 AI 接口进行精炼
-async function callAI(config: AppConfig, question: string, content: string): Promise<AIRefineResult> {
+// ============ 已收集题目管理 ============
+
+// 获取 AnkiConnect URL
+function getAnkiUrl(config: AppConfig): string {
+  return `http://${config.ankiHost}:${config.ankiPort}`;
+}
+
+// 生成题目标识 tag（去掉所有空格）
+function generateQuestionTag(title: string): string {
+  return title.replace(/\s+/g, '');
+}
+
+async function getCollectedTitles(): Promise<Set<string>> {
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEY.COLLECTED);
+    const titles = result[STORAGE_KEY.COLLECTED] || [];
+    return new Set(titles);
+  } catch {
+    return new Set();
+  }
+}
+
+async function markAsCollected(title: string): Promise<void> {
+  const normalizedTitle = title.replace(/\s+/g, '');
+  const collected = await getCollectedTitles();
+  collected.add(normalizedTitle);
+  await chrome.storage.local.set({ [STORAGE_KEY.COLLECTED]: Array.from(collected) });
+}
+
+// 通过 Anki tag 检查是否已收集（保底方案）
+async function checkAnkiByTag(tag: string, config: AppConfig): Promise<boolean> {
+  try {
+    const response = await fetch(getAnkiUrl(config), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'findNotes',
+        version: 6,
+        params: {
+          query: `tag:"${tag}"`
+        }
+      })
+    });
+
+    const result: AnkiConnectResponse<number[]> = await response.json();
+    return result.result !== null && result.result.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// 双重检查：本地缓存 + Anki tag
+async function isCollected(title: string, config: AppConfig): Promise<boolean> {
+  // 去掉所有空格作为唯一标识
+  const normalizedTitle = title.replace(/\s+/g, '');
+
+  // 1. 先查本地缓存（快速）
+  const localCollected = await getCollectedTitles();
+  if (localCollected.has(normalizedTitle)) {
+    return true;
+  }
+
+  // 2. 再查 Anki tag（保底，跨设备同步）
+  return await checkAnkiByTag(normalizedTitle, config);
+}
+
+// ============ 任务管理 ============
+
+async function getTasks(): Promise<Record<string, Task>> {
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEY.TASKS);
+    return result[STORAGE_KEY.TASKS] || {};
+  } catch {
+    return {};
+  }
+}
+
+async function setTask(title: string, task: Task): Promise<void> {
+  const tasks = await getTasks();
+  tasks[title] = task;
+  await chrome.storage.local.set({ [STORAGE_KEY.TASKS]: tasks });
+}
+
+async function removeTask(title: string): Promise<void> {
+  const tasks = await getTasks();
+  delete tasks[title];
+  await chrome.storage.local.set({ [STORAGE_KEY.TASKS]: tasks });
+}
+
+// ============ AI 调用 ============
+
+async function callAI(
+  config: AppConfig,
+  question: string,
+  content: string,
+  signal?: AbortSignal
+): Promise<AIRefineResult> {
   const userContent = `question: ${question}\n\nmaterial: ${content}`;
 
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -160,7 +267,8 @@ async function callAI(config: AppConfig, question: string, content: string): Pro
       ],
       temperature: 0.3,
       response_format: { type: 'json_object' }
-    })
+    }),
+    signal
   });
 
   if (!response.ok) {
@@ -199,9 +307,13 @@ async function callAI(config: AppConfig, question: string, content: string): Pro
   }
 }
 
-// 调用 AnkiConnect 添加笔记
-async function addToAnki(config: AppConfig, card: AnkiCard): Promise<number> {
-  const response = await fetch('http://localhost:8765', {
+// ============ AnkiConnect ============
+
+async function addToAnki(config: AppConfig, card: AnkiCard, questionTag: string): Promise<number> {
+  // 在原有 tags 基础上添加题目标识 tag
+  const finalTags = [...card.tags, questionTag];
+
+  const response = await fetch(getAnkiUrl(config), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -217,7 +329,7 @@ async function addToAnki(config: AppConfig, card: AnkiCard): Promise<number> {
             [config.frontField]: card.front,
             [config.backField]: card.back
           },
-          tags: card.tags,
+          tags: finalTags,
           options: {
             allowDuplicate: false
           }
@@ -239,7 +351,8 @@ async function addToAnki(config: AppConfig, card: AnkiCard): Promise<number> {
   return result.result as number;
 }
 
-// 测试 AI 连接
+// ============ 连接测试 ============
+
 async function testAIConnection(config: AppConfig): Promise<boolean> {
   try {
     const response = await fetch(`${config.baseUrl}/models`, {
@@ -253,10 +366,9 @@ async function testAIConnection(config: AppConfig): Promise<boolean> {
   }
 }
 
-// 测试 AnkiConnect 连接
-async function testAnkiConnection(): Promise<boolean> {
+async function testAnkiConnection(config: AppConfig): Promise<boolean> {
   try {
-    const response = await fetch('http://localhost:8765', {
+    const response = await fetch(getAnkiUrl(config), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -276,73 +388,183 @@ async function testAnkiConnection(): Promise<boolean> {
   }
 }
 
-// 完整的保存流程
-async function saveToAnki(question: QuestionData): Promise<MessageResponse> {
+// ============ 异步任务执行 ============
+
+// 存储进行中任务的 AbortController
+const taskAbortControllers = new Map<string, AbortController>();
+
+async function executeTask(question: QuestionData): Promise<void> {
+  const title = question.title.trim();
+
+  // 创建 AbortController 用于取消
+  const abortController = new AbortController();
+  taskAbortControllers.set(title, abortController);
+
   try {
     const config = await getConfig();
 
-    if (!config.apiKey) {
-      return { success: false, error: '请先配置 AI API Key' };
+    // 检查是否已取消
+    if (abortController.signal.aborted) {
+      throw new Error('任务已取消');
     }
 
+    if (!config.apiKey) {
+      await setTask(title, {
+        title,
+        url: question.url,
+        status: 'error',
+        progress: '配置错误',
+        error: '请先配置 AI API Key'
+      });
+      return;
+    }
+
+    // AI 精炼
+    await setTask(title, {
+      title,
+      url: question.url,
+      status: 'processing',
+      progress: 'AI 精炼中...'
+    });
+
     console.log('[Background] 正在调用 AI 精炼...');
-    const refineResult = await callAI(config, question.title, question.answer);
+    const refineResult = await callAI(config, question.title, question.answer, abortController.signal);
     console.log('[Background] AI 精炼完成，生成', refineResult.cards.length, '张卡片');
 
+    // 检查是否已取消
+    if (abortController.signal.aborted) {
+      throw new Error('任务已取消');
+    }
+
+    // 添加到 Anki
+    const questionTag = generateQuestionTag(title);
     const noteIds: number[] = [];
-    for (const card of refineResult.cards) {
-      console.log('[Background] 正在添加卡片:', card.front.substring(0, 30) + '...');
-      const noteId = await addToAnki(config, card);
+    for (let i = 0; i < refineResult.cards.length; i++) {
+      // 检查是否已取消
+      if (abortController.signal.aborted) {
+        throw new Error('任务已取消');
+      }
+
+      await setTask(title, {
+        title,
+        url: question.url,
+        status: 'processing',
+        progress: `添加卡片 ${i + 1}/${refineResult.cards.length}`
+      });
+
+      const noteId = await addToAnki(config, refineResult.cards[i], questionTag);
       noteIds.push(noteId);
     }
 
     console.log('[Background] 添加成功, noteIds:', noteIds);
 
-    return {
-      success: true,
-      data: { noteIds, cards: refineResult.cards }
-    };
+    // 标记为已收集并移除任务
+    await markAsCollected(title);
+    await removeTask(title);
+
   } catch (error) {
-    console.error('[Background] 保存失败:', error);
-    return {
-      success: false,
+    // 如果是取消导致的错误，直接移除任务
+    if (error instanceof Error && error.message === '任务已取消') {
+      console.log('[Background] 任务已取消:', title);
+      await removeTask(title);
+      return;
+    }
+
+    console.error('[Background] 任务执行失败:', error);
+    await setTask(title, {
+      title,
+      url: question.url,
+      status: 'error',
+      progress: '执行失败',
       error: error instanceof Error ? error.message : 'Unknown error'
-    };
+    });
+  } finally {
+    taskAbortControllers.delete(title);
   }
 }
 
-// 导出 Background Script
+// ============ Background Script 入口 ============
+
 export default defineBackground(() => {
   console.log('[Background] 面试鸭 Anki 助手已启动');
 
-  // 监听消息
   chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
     const handleMessage = async () => {
       switch (message.type) {
-        case 'SAVE_TO_ANKI': {
+        case 'START_TASK': {
           const { question } = message.payload as SaveToAnkiRequest;
-          return saveToAnki(question);
+          const title = question.title.trim();
+          const config = await getConfig();
+
+          // 检查是否已收集
+          if (await isCollected(title, config)) {
+            return { success: true, data: { duplicate: true } };
+          }
+
+          // 检查是否已有进行中的任务
+          const tasks = await getTasks();
+          if (tasks[title]) {
+            return { success: true, data: { duplicate: false, started: false, reason: '任务已存在' } };
+          }
+
+          // 创建任务并异步执行
+          await setTask(title, {
+            title,
+            url: question.url,
+            status: 'processing',
+            progress: '准备中...'
+          });
+
+          // 异步执行任务（不等待）
+          executeTask(question);
+
+          return { success: true, data: { duplicate: false, started: true } };
         }
+
+        case 'GET_TASKS': {
+          const tasks = await getTasks();
+          return { success: true, data: tasks };
+        }
+
+        case 'CANCEL_TASK': {
+          const { title } = message.payload as { title: string };
+          const abortController = taskAbortControllers.get(title);
+          if (abortController) {
+            abortController.abort();
+          }
+          await removeTask(title);
+          return { success: true };
+        }
+
         case 'GET_CONFIG': {
           const config = await getConfig();
           return { success: true, data: config };
         }
+
         case 'TEST_AI_CONNECTION': {
           const payload = message.payload as TestAIConnectionRequest | undefined;
           const config = payload ? { baseUrl: payload.baseUrl, apiKey: payload.apiKey } : await getConfig();
           const connected = await testAIConnection(config as AppConfig);
           return { success: connected, error: connected ? undefined : 'AI 连接失败，请检查配置' };
         }
+
         case 'TEST_ANKI_CONNECTION': {
-          const connected = await testAnkiConnection();
+          const config = await getConfig();
+          const connected = await testAnkiConnection(config);
           return { success: connected, error: connected ? undefined : 'AnkiConnect 连接失败，请确保 Anki 已启动且 AnkiConnect 插件已安装' };
         }
+
+        case 'CLEAR_COLLECTED_CACHE': {
+          await chrome.storage.local.remove(STORAGE_KEY.COLLECTED);
+          return { success: true };
+        }
+
         default:
           return { success: false, error: `Unknown message type: ${message.type}` };
       }
     };
 
     handleMessage().then(sendResponse);
-    return true; // 保持消息通道打开
+    return true;
   });
 });
