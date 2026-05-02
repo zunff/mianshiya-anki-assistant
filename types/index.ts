@@ -171,6 +171,7 @@ export interface Task {
   progress: string;
   cardsCount?: number;
   error?: string;
+  question?: QuestionData;  // 保存原始题目数据用于恢复
 }
 
 // ============ 存储键名 ============

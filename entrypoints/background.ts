@@ -24,6 +24,10 @@ const STORAGE_KEY = {
   COLLECTED: 'mianshiya-anki-collected'
 } as const;
 
+// Service Worker 保活配置
+const TASK_ALARM_NAME = 'mianshiya-task-keepalive';
+const TASK_ALARM_INTERVAL_MINUTES = 0.4; // 约25秒，确保在 Chrome 30秒超时前唤醒
+
 // AI 精炼 Prompt
 const AI_REFINE_PROMPT = `你是"面试八股 Anki 制卡器"。目标：把【题目+解析原文】拆成"3+1"卡组，便于 30~60 秒口述与复习。
 
@@ -388,6 +392,47 @@ async function testAnkiConnection(config: AppConfig): Promise<boolean> {
   }
 }
 
+// ============ Service Worker 保活 ============
+
+async function startTaskKeepalive(): Promise<void> {
+  await chrome.alarms.create(TASK_ALARM_NAME, {
+    delayInMinutes: TASK_ALARM_INTERVAL_MINUTES,
+    periodInMinutes: TASK_ALARM_INTERVAL_MINUTES
+  });
+  console.log('[Background] 任务保活 alarm 已启动');
+}
+
+async function stopTaskKeepalive(): Promise<void> {
+  await chrome.alarms.clear(TASK_ALARM_NAME);
+  console.log('[Background] 任务保活 alarm 已停止');
+}
+
+async function checkAndStopKeepalive(): Promise<void> {
+  const tasks = await getTasks();
+  const hasProcessing = Object.values(tasks).some(t => t.status === 'processing');
+  if (!hasProcessing) {
+    await stopTaskKeepalive();
+  }
+}
+
+// 恢复中断的任务（Service Worker 重启后）
+async function recoverTasks(): Promise<void> {
+  const tasks = await getTasks();
+  const processingTasks = Object.values(tasks).filter(
+    t => t.status === 'processing' && t.question
+  );
+
+  if (processingTasks.length === 0) return;
+
+  console.log('[Background] 发现中断的任务，正在恢复:', processingTasks.length);
+
+  for (const task of processingTasks) {
+    executeTask(task.question!);
+  }
+
+  await startTaskKeepalive();
+}
+
 // ============ 异步任务执行 ============
 
 // 存储进行中任务的 AbortController
@@ -399,6 +444,9 @@ async function executeTask(question: QuestionData): Promise<void> {
   // 创建 AbortController 用于取消
   const abortController = new AbortController();
   taskAbortControllers.set(title, abortController);
+
+  // 启动保活机制
+  await startTaskKeepalive();
 
   try {
     const config = await getConfig();
@@ -419,12 +467,13 @@ async function executeTask(question: QuestionData): Promise<void> {
       return;
     }
 
-    // AI 精炼
+    // AI 精炼（保存 question 数据用于恢复）
     await setTask(title, {
       title,
       url: question.url,
       status: 'processing',
-      progress: 'AI 精炼中...'
+      progress: 'AI 精炼中...',
+      question  // 保存原始数据，Service Worker 重启后可恢复
     });
 
     console.log('[Background] 正在调用 AI 精炼...');
@@ -449,7 +498,8 @@ async function executeTask(question: QuestionData): Promise<void> {
         title,
         url: question.url,
         status: 'processing',
-        progress: `添加卡片 ${i + 1}/${refineResult.cards.length}`
+        progress: `添加卡片 ${i + 1}/${refineResult.cards.length}`,
+        question
       });
 
       const noteId = await addToAnki(config, refineResult.cards[i], questionTag);
@@ -480,6 +530,7 @@ async function executeTask(question: QuestionData): Promise<void> {
     });
   } finally {
     taskAbortControllers.delete(title);
+    await checkAndStopKeepalive();
   }
 }
 
@@ -487,6 +538,22 @@ async function executeTask(question: QuestionData): Promise<void> {
 
 export default defineBackground(() => {
   console.log('[Background] 面试鸭 Anki 助手已启动');
+
+  // 启动时恢复中断的任务
+  recoverTasks();
+
+  // 监听 alarm，保持 Service Worker 存活
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === TASK_ALARM_NAME) {
+      const tasks = await getTasks();
+      const hasProcessing = Object.values(tasks).some(t => t.status === 'processing');
+      if (!hasProcessing) {
+        await stopTaskKeepalive();
+      } else {
+        console.log('[Background] 保活 alarm 触发，仍有任务处理中');
+      }
+    }
+  });
 
   chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
     const handleMessage = async () => {
@@ -512,7 +579,8 @@ export default defineBackground(() => {
             title,
             url: question.url,
             status: 'processing',
-            progress: '准备中...'
+            progress: '准备中...',
+            question  // 保存原始数据，用于 Service Worker 重启后恢复
           });
 
           // 异步执行任务（不等待）
