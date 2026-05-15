@@ -97,29 +97,32 @@
     padding-left: 2px;
 }
 
-/* --- 列表样式 --- */
+/* --- 列表样式：优先兼容有序编号与自然缩进 --- */
+.card-content ol,
 .card-content ul {
-    list-style-type: none;
-    padding-left: 0;
     margin: 6px 0 10px 0;
+    padding-left: 22px;
 }
 
-.card-content ul li {
+.card-content ol {
+    list-style: decimal;
+}
+
+.card-content ul {
+    list-style: disc;
+}
+
+.card-content li {
     font-size: 15px;
     color: #115E59;
     margin-bottom: 6px;
-    padding-left: 20px;
-    position: relative;
+    padding-left: 0;
 }
 
-.card-content ul li::before {
-    content: "▸";
+.card-content ol li::marker,
+.card-content ul li::marker {
     color: #14B8A6;
-    font-weight: bold;
-    position: absolute;
-    left: 5px;
-    top: 0;
-    font-size: 12px;
+    font-weight: 600;
 }
 
 /* --- 代码样式 --- */
@@ -191,11 +194,12 @@ hr {
 }
 
 .night_mode .card-content p,
-.night_mode .card-content ul li {
+.night_mode .card-content li {
     color: #CBD5E1 !important;
 }
 
-.night_mode .card-content ul li::before {
+.night_mode .card-content ol li::marker,
+.night_mode .card-content ul li::marker {
     color: #2DD4BF !important;
 }
 
@@ -235,9 +239,8 @@ hr {
         font-size: 16px;
         padding: 5px 10px;
     }
-    .card-content ul li {
+    .card-content li {
         font-size: 14px;
     }
 }
-```
 ```
